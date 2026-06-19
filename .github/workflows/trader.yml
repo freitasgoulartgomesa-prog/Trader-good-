@@ -1,17 +1,32 @@
-name: Trader Good
+trader.yml
 
+name: Trader Good - agente em tempo real
 on:
-  workflow_dispatch:
-
+  schedule:
+    - cron: '*/5 * * * *'
+  workflow_dispatch: {}
+permissions:
+  contents: write
+concurrency:
+  group: trader-good
+  cancel-in-progress: false
 jobs:
-  run:
+  pulso:
     runs-on: ubuntu-latest
-
+    timeout-minutes: 4
     steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-python@v5
+      - name: Baixar o repositório
+        uses: actions/checkout@v4
+      - name: Configurar Python
+        uses: actions/setup-python@v5
         with:
-          python-version: "3.11"
-
-      - run: python trader_good_gh.py
+          python-version: '3.11'
+      - name: Rodar um pulso do agente
+        run: python trader_good_gh.py
+      - name: Salvar o estado novo de volta no repositório
+        run: |
+          git config user.name "trader-good-bot"
+          git config user.email "actions@users.noreply.github.com"
+          git add estado.json RELATORIO.md historico_operacoes.jsonl
+          git diff --staged --quiet || git commit -m "pulso automático $(date -u +'%Y-%m-%d %H:%M UTC')"
+          git push

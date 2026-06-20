@@ -1,242 +1,211 @@
 """
-video_processor.py — extrai frames e transcrição de qualquer URL de vídeo.
+video_processor.py — analisa vídeos do YouTube via API oficial.
 
 Uso:
-  python3 scripts/video_processor.py <URL> [--frames N] [--out DIR]
+  python3 scripts/video_processor.py <URL_ou_VIDEO_ID>
 
-Saída:
-  /tmp/video_analysis/<hash>/
-    info.json       — metadados (título, duração, descrição, etc.)
-    transcript.txt  — legenda/transcrição (se disponível)
-    frames/
-      frame_001.jpg ... frame_N.jpg
-    summary.txt     — caminho dos arquivos gerados (para leitura rápida)
+Requer:
+  YOUTUBE_API_KEY no arquivo .env (raiz do projeto)
+
+Saída em /tmp/video_analysis/<video_id>/
+  info.json       — metadados completos
+  transcript.txt  — transcrição (se disponível)
+  thumbnail.jpg   — imagem de capa
+  summary.txt     — resumo dos caminhos gerados
 """
 
 import argparse
-import hashlib
 import json
 import os
+import re
 import sys
-import subprocess
-import tempfile
 
-# yt-dlp importado após garantir instalação
-try:
-    import yt_dlp
-except ImportError:
-    subprocess.check_call([sys.executable, "-m", "pip", "install", "yt-dlp", "-q"])
-    import yt_dlp
+# Instala dependências se necessário
+def ensure_deps():
+    pkgs = {"requests": "requests", "dotenv": "python-dotenv", "youtube_transcript_api": "youtube-transcript-api"}
+    for imp, pkg in pkgs.items():
+        try:
+            __import__(imp)
+        except ImportError:
+            import subprocess
+            subprocess.check_call([sys.executable, "-m", "pip", "install", pkg, "-q"])
 
-try:
-    from imageio_ffmpeg import get_ffmpeg_exe
-    FFMPEG = get_ffmpeg_exe()
-except ImportError:
-    subprocess.check_call([sys.executable, "-m", "pip", "install", "imageio[ffmpeg]", "-q"])
-    from imageio_ffmpeg import get_ffmpeg_exe
-    FFMPEG = get_ffmpeg_exe()
+ensure_deps()
+
+import requests
+from dotenv import load_dotenv
+
+load_dotenv(dotenv_path=os.path.join(os.path.dirname(__file__), "..", ".env"))
+
+YOUTUBE_API_KEY = os.getenv("YOUTUBE_API_KEY")
+YT_API_BASE = "https://www.googleapis.com/youtube/v3"
 
 
-def url_hash(url: str) -> str:
-    return hashlib.md5(url.encode()).hexdigest()[:8]
+def extract_video_id(url_or_id: str) -> str:
+    patterns = [
+        r"(?:v=|youtu\.be/|embed/|shorts/)([A-Za-z0-9_-]{11})",
+        r"^([A-Za-z0-9_-]{11})$",
+    ]
+    for p in patterns:
+        m = re.search(p, url_or_id)
+        if m:
+            return m.group(1)
+    raise ValueError(f"Não foi possível extrair o ID do vídeo de: {url_or_id}")
 
 
-def extract_info_and_transcript(url: str, out_dir: str) -> dict:
-    ydl_opts = {
-        "quiet": True,
-        "no_warnings": True,
-        "skip_download": True,
-        "writesubtitles": True,
-        "writeautomaticsub": True,
-        "subtitleslangs": ["pt", "pt-BR", "en"],
-        "subtitlesformat": "vtt",
-        "outtmpl": os.path.join(out_dir, "video"),
-        "cookiesfrombrowser": None,
-        "nocheckcertificate": True,
+def get_video_metadata(video_id: str) -> dict:
+    url = f"{YT_API_BASE}/videos"
+    params = {
+        "part": "snippet,statistics,contentDetails",
+        "id": video_id,
+        "key": YOUTUBE_API_KEY,
+    }
+    r = requests.get(url, params=params, timeout=15)
+    r.raise_for_status()
+    data = r.json()
+
+    if not data.get("items"):
+        raise ValueError(f"Vídeo não encontrado ou privado: {video_id}")
+
+    item = data["items"][0]
+    snippet = item.get("snippet", {})
+    stats = item.get("statistics", {})
+    details = item.get("contentDetails", {})
+
+    return {
+        "video_id": video_id,
+        "title": snippet.get("title", ""),
+        "description": snippet.get("description", "")[:2000],
+        "channel": snippet.get("channelTitle", ""),
+        "published_at": snippet.get("publishedAt", ""),
+        "duration": details.get("duration", ""),
+        "tags": snippet.get("tags", [])[:20],
+        "category_id": snippet.get("categoryId", ""),
+        "view_count": stats.get("viewCount"),
+        "like_count": stats.get("likeCount"),
+        "comment_count": stats.get("commentCount"),
+        "thumbnail_url": (
+            snippet.get("thumbnails", {}).get("maxres") or
+            snippet.get("thumbnails", {}).get("high") or
+            snippet.get("thumbnails", {}).get("medium") or
+            {}
+        ).get("url", ""),
+        "url": f"https://www.youtube.com/watch?v={video_id}",
     }
 
-    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-        info = ydl.extract_info(url, download=False)
 
-    # Salvar info.json (campos principais)
-    info_clean = {
-        "title": info.get("title", ""),
-        "description": (info.get("description") or "")[:2000],
-        "duration": info.get("duration"),
-        "duration_string": info.get("duration_string", ""),
-        "uploader": info.get("uploader", ""),
-        "upload_date": info.get("upload_date", ""),
-        "view_count": info.get("view_count"),
-        "like_count": info.get("like_count"),
-        "url": url,
-        "webpage_url": info.get("webpage_url", url),
-        "thumbnail": info.get("thumbnail", ""),
-        "tags": info.get("tags", [])[:20],
-        "categories": info.get("categories", []),
-        "chapters": info.get("chapters", []),
-    }
-    with open(os.path.join(out_dir, "info.json"), "w", encoding="utf-8") as f:
-        json.dump(info_clean, f, ensure_ascii=False, indent=2)
-
-    return info
-
-
-def download_transcript(url: str, out_dir: str) -> str | None:
-    ydl_opts = {
-        "quiet": True,
-        "no_warnings": True,
-        "skip_download": True,
-        "writesubtitles": True,
-        "writeautomaticsub": True,
-        "subtitleslangs": ["pt", "pt-BR", "en"],
-        "subtitlesformat": "vtt",
-        "outtmpl": os.path.join(out_dir, "video"),
-        "nocheckcertificate": True,
-    }
-    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-        ydl.download([url])
-
-    # Procurar arquivo de legenda gerado
-    for fname in os.listdir(out_dir):
-        if fname.endswith(".vtt"):
-            vtt_path = os.path.join(out_dir, fname)
-            txt_path = os.path.join(out_dir, "transcript.txt")
-            _vtt_to_txt(vtt_path, txt_path)
-            return txt_path
-    return None
-
-
-def _vtt_to_txt(vtt_path: str, txt_path: str):
-    """Converte VTT para texto limpo."""
-    import re
-    with open(vtt_path, encoding="utf-8") as f:
-        content = f.read()
-
-    lines = content.splitlines()
-    seen = set()
-    result = []
-    for line in lines:
-        line = line.strip()
-        if not line or line.startswith("WEBVTT") or "-->" in line:
-            continue
-        if re.match(r"^\d+$", line):
-            continue
-        # Remove tags HTML
-        line = re.sub(r"<[^>]+>", "", line)
-        if line and line not in seen:
-            seen.add(line)
-            result.append(line)
-
-    with open(txt_path, "w", encoding="utf-8") as f:
-        f.write("\n".join(result))
-
-
-def download_video_for_frames(url: str, out_dir: str) -> str | None:
-    video_path = os.path.join(out_dir, "video.mp4")
-    ydl_opts = {
-        "quiet": True,
-        "no_warnings": True,
-        "format": "bestvideo[ext=mp4][height<=480]+bestaudio[ext=m4a]/best[ext=mp4][height<=480]/best[height<=480]/best",
-        "outtmpl": video_path,
-        "merge_output_format": "mp4",
-        "nocheckcertificate": True,
-    }
+def download_thumbnail(url: str, out_path: str) -> bool:
+    if not url:
+        return False
     try:
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            ydl.download([url])
-        if os.path.exists(video_path):
-            return video_path
+        r = requests.get(url, timeout=15)
+        r.raise_for_status()
+        with open(out_path, "wb") as f:
+            f.write(r.content)
+        return True
     except Exception as e:
-        print(f"[AVISO] Não foi possível baixar o vídeo para frames: {e}", file=sys.stderr)
+        print(f"  [AVISO] Thumbnail não baixada: {e}", file=sys.stderr)
+        return False
+
+
+def get_transcript(video_id: str) -> str | None:
+    from youtube_transcript_api import YouTubeTranscriptApi
+
+    api = YouTubeTranscriptApi()
+
+    # Tenta PT primeiro, depois EN, depois qualquer idioma disponível
+    for langs in [["pt", "pt-BR"], ["en", "en-US"], None]:
+        try:
+            if langs:
+                entries = api.fetch(video_id, languages=langs)
+            else:
+                transcript_list = api.list(video_id)
+                entries = next(iter(transcript_list)).fetch()
+            return _format_transcript(entries)
+        except Exception:
+            pass
+
     return None
 
 
-def extract_frames(video_path: str, frames_dir: str, n_frames: int, duration: float | None):
-    os.makedirs(frames_dir, exist_ok=True)
-
-    if duration and duration > 0:
-        interval = duration / (n_frames + 1)
-        timestamps = [interval * (i + 1) for i in range(n_frames)]
-    else:
-        timestamps = list(range(10, 10 + n_frames * 30, 30))
-
-    generated = []
-    for i, ts in enumerate(timestamps):
-        out_path = os.path.join(frames_dir, f"frame_{i+1:03d}.jpg")
-        cmd = [
-            FFMPEG, "-ss", str(ts), "-i", video_path,
-            "-vframes", "1", "-q:v", "3", out_path, "-y", "-loglevel", "error"
-        ]
-        result = subprocess.run(cmd, capture_output=True)
-        if result.returncode == 0 and os.path.exists(out_path):
-            generated.append(out_path)
-
-    return generated
+def _format_transcript(entries) -> str:
+    seen = set()
+    lines = []
+    for entry in entries:
+        text = entry.get("text", "").strip()
+        if text and text not in seen:
+            seen.add(text)
+            lines.append(text)
+    return "\n".join(lines)
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Analisa vídeo de qualquer URL")
-    parser.add_argument("url", help="URL do vídeo")
-    parser.add_argument("--frames", type=int, default=8, help="Número de frames a extrair (default: 8)")
-    parser.add_argument("--out", default="/tmp/video_analysis", help="Diretório de saída base")
+    if not YOUTUBE_API_KEY:
+        print("ERRO: YOUTUBE_API_KEY não encontrada. Verifique o arquivo .env", file=sys.stderr)
+        sys.exit(1)
+
+    parser = argparse.ArgumentParser(description="Analisa vídeo do YouTube via API")
+    parser.add_argument("url", help="URL ou ID do vídeo YouTube")
+    parser.add_argument("--out", default="/tmp/video_analysis", help="Diretório de saída")
     args = parser.parse_args()
 
-    uid = url_hash(args.url)
-    out_dir = os.path.join(args.out, uid)
-    frames_dir = os.path.join(out_dir, "frames")
+    print(f"[1/4] Extraindo ID do vídeo...")
+    video_id = extract_video_id(args.url)
+    print(f"      ID: {video_id}")
+
+    out_dir = os.path.join(args.out, video_id)
     os.makedirs(out_dir, exist_ok=True)
 
-    print(f"[1/4] Extraindo metadados de: {args.url}")
-    info = extract_info_and_transcript(args.url, out_dir)
-    duration = info.get("duration")
-    title = info.get("title", "")
-    print(f"      Título: {title} | Duração: {info.get('duration_string', '?')}")
+    print(f"[2/4] Buscando metadados via YouTube API...")
+    info = get_video_metadata(video_id)
+    print(f"      Título: {info['title']}")
+    print(f"      Canal:  {info['channel']} | Duração: {info['duration']}")
 
-    print("[2/4] Baixando transcrição/legendas...")
-    transcript_path = download_transcript(args.url, out_dir)
-    if transcript_path:
-        print(f"      Transcrição salva em: {transcript_path}")
+    info_path = os.path.join(out_dir, "info.json")
+    with open(info_path, "w", encoding="utf-8") as f:
+        json.dump(info, f, ensure_ascii=False, indent=2)
+
+    print(f"[3/4] Baixando thumbnail...")
+    thumbnail_path = os.path.join(out_dir, "thumbnail.jpg")
+    has_thumb = download_thumbnail(info["thumbnail_url"], thumbnail_path)
+    if has_thumb:
+        print(f"      Thumbnail salva.")
     else:
-        print("      Transcrição não disponível.")
+        thumbnail_path = None
 
-    print("[3/4] Baixando vídeo para extração de frames...")
-    video_path = download_video_for_frames(args.url, out_dir)
-
-    frames = []
-    if video_path:
-        print(f"[4/4] Extraindo {args.frames} frames...")
-        frames = extract_frames(video_path, frames_dir, args.frames, duration)
-        print(f"      {len(frames)} frames extraídos.")
-        # Remover vídeo para economizar espaço
-        os.remove(video_path)
+    print(f"[4/4] Buscando transcrição...")
+    transcript = get_transcript(video_id)
+    transcript_path = None
+    if transcript:
+        transcript_path = os.path.join(out_dir, "transcript.txt")
+        with open(transcript_path, "w", encoding="utf-8") as f:
+            f.write(transcript)
+        print(f"      Transcrição salva ({len(transcript.splitlines())} linhas).")
     else:
-        print("[4/4] Pulando extração de frames (vídeo não disponível).")
+        print(f"      Transcrição não disponível para este vídeo.")
 
-    # Gerar summary.txt com todos os caminhos
+    # summary.txt
     summary_path = os.path.join(out_dir, "summary.txt")
     with open(summary_path, "w") as f:
         f.write(f"ANÁLISE DE VÍDEO\n")
         f.write(f"URL: {args.url}\n")
-        f.write(f"Diretório: {out_dir}\n\n")
-        f.write(f"ARQUIVOS GERADOS:\n")
-        f.write(f"  info.json:      {os.path.join(out_dir, 'info.json')}\n")
+        f.write(f"ID:  {video_id}\n\n")
+        f.write(f"ARQUIVOS:\n")
+        f.write(f"  info.json:   {info_path}\n")
+        if thumbnail_path:
+            f.write(f"  thumbnail:   {thumbnail_path}\n")
         if transcript_path:
-            f.write(f"  transcript.txt: {transcript_path}\n")
-        if frames:
-            f.write(f"  frames ({len(frames)}):\n")
-            for fp in frames:
-                f.write(f"    {fp}\n")
+            f.write(f"  transcript:  {transcript_path}\n")
 
-    print(f"\nConcluído! Resumo em: {summary_path}")
-    print(f"Diretório completo: {out_dir}")
-    # Imprimir JSON para fácil parsing
     result = {
+        "video_id": video_id,
         "out_dir": out_dir,
-        "info_json": os.path.join(out_dir, "info.json"),
+        "info_json": info_path,
+        "thumbnail": thumbnail_path,
         "transcript": transcript_path,
-        "frames": frames,
         "summary": summary_path,
     }
+    print(f"\nConcluído! Diretório: {out_dir}")
     print(f"\nJSON_RESULT:{json.dumps(result)}")
 
 

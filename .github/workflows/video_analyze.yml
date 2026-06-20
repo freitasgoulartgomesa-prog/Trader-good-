@@ -1,0 +1,72 @@
+name: Video Analyze — processa vídeo com acesso completo à internet
+
+on:
+  workflow_dispatch:
+    inputs:
+      video_url:
+        description: 'URL do vídeo YouTube'
+        required: true
+        type: string
+      frames:
+        description: 'Número de frames a extrair'
+        required: false
+        default: '8'
+        type: string
+      ref_branch:
+        description: 'Branch para commitar os resultados'
+        required: false
+        default: 'claude/oi-gk0t6s'
+        type: string
+
+jobs:
+  analyze:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.ref_branch }}
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Instalar dependências de sistema
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y ffmpeg --fix-missing 2>/dev/null || true
+          ffmpeg -version 2>&1 | head -1
+
+      - name: Instalar dependências Python
+        run: |
+          pip install -q \
+            yt-dlp \
+            "imageio[ffmpeg]" \
+            requests \
+            python-dotenv \
+            youtube-transcript-api \
+            groq \
+            isodate
+
+      - name: Processar vídeo
+        env:
+          YOUTUBE_API_KEY: ${{ secrets.YOUTUBE_API_KEY }}
+          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+        run: |
+          python scripts/video_processor_actions.py \
+            "${{ github.event.inputs.video_url }}" \
+            --frames ${{ github.event.inputs.frames }} \
+            --out video_results
+
+      - name: Commitar resultados
+        run: |
+          git config --local user.email "github-actions[bot]@users.noreply.github.com"
+          git config --local user.name "github-actions[bot]"
+          git add video_results/
+          git diff --staged --quiet && echo "Sem mudanças." || \
+            git commit -m "feat(video): análise de ${{ github.event.inputs.video_url }}" && \
+            git push origin ${{ github.event.inputs.ref_branch }}

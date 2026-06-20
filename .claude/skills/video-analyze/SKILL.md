@@ -1,95 +1,103 @@
-# Skill: video-analyze — Fase 1
+# Skill: video-analyze
 
-Analisa qualquer vídeo do YouTube extraindo metadados, transcrição e frames visuais.
+Analisa qualquer vídeo do YouTube — metadados, transcrição e frames visuais.
+Funciona tanto no **iPhone via browser** quanto no **PC local**.
 
-## Setup (primeira vez)
+---
 
+## Como funciona por ambiente
+
+### iPhone / browser (claude.ai/code)
+Claude detecta que está no sandbox e **dispara um GitHub Action automaticamente**.
+O Action roda num servidor com internet completa, processa o vídeo e commita
+os resultados no repositório. Claude lê os arquivos e faz a análise.
+
+### PC local
+Claude processa tudo diretamente no seu computador.
+
+---
+
+## Setup (única vez)
+
+### 1. Instalar dependências (PC)
 ```bash
 bash scripts/setup_video_skill.sh
 ```
 
-Preencha o arquivo `.env` na raiz do projeto:
+### 2. Configurar o arquivo `.env`
 ```
-YOUTUBE_API_KEY=...   # obrigatório — console.cloud.google.com
-GROQ_API_KEY=...      # recomendado — console.groq.com (gratuito)
+YOUTUBE_API_KEY=...     # obrigatório — console.cloud.google.com
+GROQ_API_KEY=...        # recomendado — console.groq.com (grátis)
+GITHUB_TOKEN=...        # obrigatório para iPhone — github.com/settings/tokens
+GITHUB_REPO=freitasgoulartgomesa-prog/Trader-good-
+GITHUB_BRANCH=claude/oi-gk0t6s
+```
+
+**Como criar o GITHUB_TOKEN:**
+1. Acesse github.com/settings/tokens → "Generate new token (classic)"
+2. Marque os escopos: `repo` e `workflow`
+3. Cole no `.env`
+
+### 3. Configurar secrets no repositório GitHub (para o Action)
+Acesse: github.com/freitasgoulartgomesa-prog/Trader-good-/settings/secrets/actions
+
+Adicione dois secrets:
+- `YOUTUBE_API_KEY` — a mesma chave do `.env`
+- `GROQ_API_KEY` — a mesma chave do `.env`
+
+---
+
+## Como usar
+
+```
+/video-analyze <URL_DO_YOUTUBE>
+```
+
+Exemplos:
+```
+/video-analyze https://youtu.be/JR1xPUCTr4w
+/video-analyze https://www.youtube.com/watch?v=dQw4w9WgXcQ
 ```
 
 ---
 
-## Como executar
+## O que fazer após o script completar
 
-### Passo 1 — Rodar o processador
+### Passo 1 — Parsear o JSON_RESULT
+A última linha da saída contém `JSON_RESULT:{...}` com os caminhos:
+- `info_json`  — metadados
+- `transcript` — transcrição (null se indisponível)
+- `frames`     — lista de caminhos de imagens
+- `thumbnail`  — capa do vídeo
 
-```bash
-python3 scripts/video_processor.py "<URL>" --frames 8
-```
+### Passo 2 — Ler os arquivos
+1. Leia `info_json` com o Read tool
+2. Se `transcript` não for null, leia o arquivo de transcrição
+3. Leia cada frame da lista `frames` com o Read tool (Claude vê imagens)
+4. Se `thumbnail` não for null, leia a capa
 
-Parâmetros de `--frames`:
-| Valor | Quando usar |
-|---|---|
-| `3` | Shorts, clips curtos (<3 min) |
-| `8` | Padrão — tutoriais, podcasts, análises |
-| `12` | Vídeos muito visuais (gráficos, comparações) |
-| `20` | Análise profunda (documentários, aulas longas) |
-
-### Passo 2 — Ler o resultado
-
-A última linha começa com `JSON_RESULT:` — parse o JSON para obter os caminhos:
-- `info_json`  — metadados completos
-- `transcript` — transcrição em texto (pode ser null)
-- `frames`     — lista de imagens extraídas (pode ser lista vazia)
-- `thumbnail`  — imagem da capa (pode ser null)
-- `env`        — quais recursos estavam disponíveis
-
-### Passo 3 — Ler os arquivos com Read tool
-
-1. Leia `info.json` para título, canal, duração, views, likes, descrição, tags.
-2. Se `transcript` não for null, leia o arquivo. Pode ser longo — leia em blocos se necessário.
-3. Leia cada frame com o Read tool (Claude processa imagens diretamente).
-4. Se `thumbnail` não for null, leia a imagem da capa.
-
-### Passo 4 — Sintetizar e responder
-
-Com base no que foi lido, responda com:
-
-- **Contexto geral** — título, canal, data, estatísticas de engajamento
-- **Resumo do conteúdo** — baseado na transcrição (se disponível)
-- **Análise visual** — o que aparece nos frames (gráficos, texto, padrões)
-- **Insights relevantes** — ao objetivo específico do usuário
+### Passo 3 — Sintetizar
+Responda com:
+- **Contexto** — título, canal, duração, views, likes
+- **Resumo** — baseado na transcrição
+- **Análise visual** — o que aparece nos frames
+- **Insights** — relevantes ao objetivo do usuário
 
 ---
 
-## Compatibilidade por ambiente
+## Parâmetros
 
-| Recurso | PC local | Cloud sandbox (iPhone/browser) |
+| Parâmetro | Padrão | Quando usar |
 |---|---|---|
-| Metadados | ✅ | ✅ |
-| Thumbnail | ✅ | ❌ (bloqueado) |
-| Transcrição (legendas) | ✅ | ❌ (bloqueado) |
-| Transcrição (Whisper) | ✅ (requer GROQ_API_KEY) | ❌ (bloqueado) |
-| Frames visuais | ✅ | ❌ (bloqueado) |
-
-> No sandbox cloud, apenas metadados ficam disponíveis.
-> Para análise completa, execute no PC local.
+| `--frames 3` | — | Shorts (<3 min) |
+| `--frames 8` | ✅ | Tutoriais, análises, podcasts |
+| `--frames 12` | — | Vídeos muito visuais (gráficos) |
+| `--frames 20` | — | Análise profunda (documentários) |
 
 ---
 
-## Limitações conhecidas (Fase 1)
+## Limitações (Fase 1)
 
-- **Somente YouTube** — outras plataformas chegam na Fase 2
-- **Vídeos privados ou com restrição de idade** — não funcionam
-- **Vídeos muito longos (>2h)** — áudio é dividido automaticamente em chunks; transcrição completa pode levar alguns minutos
-- **DRM** (Netflix, Disney+, etc.) — impossível em qualquer ferramenta
-
----
-
-## Exemplos de uso
-
-```
-/video-analyze https://www.youtube.com/watch?v=XXXXXXXXXXX
-```
-
-Com mais frames para vídeo de análise técnica:
-```
-/video-analyze https://youtu.be/XXXXXXXXXXX --frames 12
-```
+- Somente YouTube (outras plataformas chegam na Fase 2)
+- Vídeos privados ou com restrição de idade não funcionam
+- No iPhone, o processamento leva 2-5 minutos (aguarda o GitHub Action)

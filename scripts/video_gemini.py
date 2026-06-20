@@ -28,7 +28,7 @@ GEMINI_API_KEY  = os.environ.get("GEMINI_API_KEY", "")
 YOUTUBE_API_KEY = os.environ.get("YOUTUBE_API_KEY", "")
 GEMINI_BASE     = "https://generativelanguage.googleapis.com/v1beta"
 YT_API_BASE     = "https://www.googleapis.com/youtube/v3"
-GEMINI_MODEL    = "gemini-2.0-flash"
+GEMINI_MODEL    = "gemini-2.5-flash"
 
 
 def extract_video_id(url):

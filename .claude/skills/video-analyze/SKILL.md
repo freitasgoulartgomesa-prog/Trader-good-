@@ -1,23 +1,20 @@
-# Skill: video-analyze
+# Skill: video-analyze — Fase 1
 
-Analisa qualquer vídeo a partir de uma URL, extraindo metadados, transcrição e frames visuais.
+Analisa qualquer vídeo do YouTube extraindo metadados, transcrição e frames visuais.
 
 ## Setup (primeira vez)
-
-Antes de usar, instale as dependências rodando:
 
 ```bash
 bash scripts/setup_video_skill.sh
 ```
 
-Ou manualmente:
-```bash
-pip install yt-dlp "imageio[ffmpeg]"
+Preencha o arquivo `.env` na raiz do projeto:
+```
+YOUTUBE_API_KEY=...   # obrigatório — console.cloud.google.com
+GROQ_API_KEY=...      # recomendado — console.groq.com (gratuito)
 ```
 
-## Trigger
-
-Invocada quando o usuário usa `/video-analyze <URL>` ou pede para "analisar", "assistir", "ver" ou "entender" um vídeo e fornece uma URL.
+---
 
 ## Como executar
 
@@ -27,56 +24,72 @@ Invocada quando o usuário usa `/video-analyze <URL>` ou pede para "analisar", "
 python3 scripts/video_processor.py "<URL>" --frames 8
 ```
 
-- Substitua `<URL>` pela URL fornecida pelo usuário.
-- O argumento `--frames` define quantos frames visuais capturar (padrão: 8). Aumente para vídeos muito visuais, diminua para podcasts/aulas.
-- A saída vai para `/tmp/video_analysis/<hash>/`.
+Parâmetros de `--frames`:
+| Valor | Quando usar |
+|---|---|
+| `3` | Shorts, clips curtos (<3 min) |
+| `8` | Padrão — tutoriais, podcasts, análises |
+| `12` | Vídeos muito visuais (gráficos, comparações) |
+| `20` | Análise profunda (documentários, aulas longas) |
 
-### Passo 2 — Coletar os caminhos
+### Passo 2 — Ler o resultado
 
-A última linha de saída do script começa com `JSON_RESULT:` e contém um JSON com os caminhos:
-- `info_json` — metadados completos
+A última linha começa com `JSON_RESULT:` — parse o JSON para obter os caminhos:
+- `info_json`  — metadados completos
 - `transcript` — transcrição em texto (pode ser null)
-- `frames` — lista de imagens extraídas
+- `frames`     — lista de imagens extraídas (pode ser lista vazia)
+- `thumbnail`  — imagem da capa (pode ser null)
+- `env`        — quais recursos estavam disponíveis
 
-### Passo 3 — Ler os arquivos
+### Passo 3 — Ler os arquivos com Read tool
 
-1. Leia `info.json` com o Read tool para obter título, duração, descrição, etc.
-2. Se `transcript` não for null, leia o arquivo de transcrição com o Read tool.
+1. Leia `info.json` para título, canal, duração, views, likes, descrição, tags.
+2. Se `transcript` não for null, leia o arquivo. Pode ser longo — leia em blocos se necessário.
 3. Leia cada frame com o Read tool (Claude processa imagens diretamente).
+4. Se `thumbnail` não for null, leia a imagem da capa.
 
 ### Passo 4 — Sintetizar e responder
 
-Com base no que foi lido, responda ao usuário com:
+Com base no que foi lido, responda com:
 
-- **Título e contexto geral** do vídeo
-- **Resumo do conteúdo** (via transcrição, se disponível)
-- **Análise visual** dos frames (o que aparece em cena, texto na tela, gráficos, etc.)
-- **Informações relevantes** ao objetivo do usuário (se ele pediu algo específico)
+- **Contexto geral** — título, canal, data, estatísticas de engajamento
+- **Resumo do conteúdo** — baseado na transcrição (se disponível)
+- **Análise visual** — o que aparece nos frames (gráficos, texto, padrões)
+- **Insights relevantes** — ao objetivo específico do usuário
 
-## Comportamento por tipo de conteúdo
+---
 
-| Tipo de vídeo | Foco principal |
-|---|---|
-| Tutorial / aula | Transcrição + frames de código/slides |
-| Notícia / podcast | Transcrição (frames menos importantes) |
-| Vídeo mudo / visual | Análise de frames (transcrição ausente) |
-| Short / Reels | Poucos frames (3-5), foco visual |
-| Documentário | Transcrição + frames de gráficos/mapas |
+## Compatibilidade por ambiente
 
-## Notas importantes
+| Recurso | PC local | Cloud sandbox (iPhone/browser) |
+|---|---|---|
+| Metadados | ✅ | ✅ |
+| Thumbnail | ✅ | ❌ (bloqueado) |
+| Transcrição (legendas) | ✅ | ❌ (bloqueado) |
+| Transcrição (Whisper) | ✅ (requer GROQ_API_KEY) | ❌ (bloqueado) |
+| Frames visuais | ✅ | ❌ (bloqueado) |
 
-- Vídeos privados, com DRM (Netflix, Disney+) ou restrição regional podem não funcionar.
-- Para vídeos muito longos (>1h), considere pedir ao usuário um trecho específico com `--frames 12`.
-- O script remove o arquivo de vídeo após extrair os frames para economizar espaço em disco.
-- Legendas automáticas do YouTube (mesmo sem legenda manual) geralmente estão disponíveis.
+> No sandbox cloud, apenas metadados ficam disponíveis.
+> Para análise completa, execute no PC local.
 
-## Exemplo de uso
+---
+
+## Limitações conhecidas (Fase 1)
+
+- **Somente YouTube** — outras plataformas chegam na Fase 2
+- **Vídeos privados ou com restrição de idade** — não funcionam
+- **Vídeos muito longos (>2h)** — áudio é dividido automaticamente em chunks; transcrição completa pode levar alguns minutos
+- **DRM** (Netflix, Disney+, etc.) — impossível em qualquer ferramenta
+
+---
+
+## Exemplos de uso
 
 ```
 /video-analyze https://www.youtube.com/watch?v=XXXXXXXXXXX
 ```
 
-Ou com mais frames para vídeo muito visual:
-```bash
-python3 scripts/video_processor.py "https://..." --frames 15
+Com mais frames para vídeo de análise técnica:
+```
+/video-analyze https://youtu.be/XXXXXXXXXXX --frames 12
 ```

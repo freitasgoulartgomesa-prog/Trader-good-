@@ -94,16 +94,29 @@ def download_thumbnail(url, path):
 
 def download_video(video_id, path):
     import yt_dlp
-    opts = {
+    base_opts = {
         "quiet": True, "no_warnings": True,
         "format": "best[height<=360][ext=mp4]/best[height<=480][ext=mp4]/best[ext=mp4]/best",
         "outtmpl": path, "merge_output_format": "mp4",
+        "nocheckcertificate": True,
     }
-    try:
-        with yt_dlp.YoutubeDL(opts) as ydl: ydl.download([f"https://www.youtube.com/watch?v={video_id}"])
-        return os.path.exists(path)
-    except Exception as e:
-        print(f"  [ERRO] Download: {e}", file=sys.stderr); return False
+    url = f"https://www.youtube.com/watch?v={video_id}"
+
+    # Tentativa 1: player web com skip de authcheck
+    for extra_opts in [
+        {"extractor_args": {"youtube": {"player_client": ["web"], "skip": ["authcheck"]}}},
+        {"extractor_args": {"youtube": {"player_client": ["mweb"]}}},
+        {},  # Sem extras como último fallback
+    ]:
+        try:
+            opts = {**base_opts, **extra_opts}
+            with yt_dlp.YoutubeDL(opts) as ydl:
+                ydl.download([url])
+            if os.path.exists(path):
+                return True
+        except Exception as e:
+            print(f"  [AVISO] Download tentativa falhou: {e}", file=sys.stderr)
+    return False
 
 
 # ─── Frames ───────────────────────────────────────────────────────────────────
@@ -188,15 +201,36 @@ def transcribe_chunked(audio_path, tmp_dir, duration_sec=None):
 def get_transcript_yt(video_id):
     from youtube_transcript_api import YouTubeTranscriptApi
     api = YouTubeTranscriptApi()
-    for langs in [["pt","pt-BR"], ["en","en-US"], None]:
+
+    # Lista todos disponíveis primeiro para diagnóstico
+    try:
+        transcript_list = list(api.list(video_id))
+        if transcript_list:
+            print(f"  Transcripts: {[t.language_code for t in transcript_list]}", flush=True)
+        else:
+            print(f"  Nenhuma legenda disponível para {video_id}.", file=sys.stderr)
+            return None
+    except Exception as e:
+        print(f"  [AVISO] list() falhou: {e}", file=sys.stderr)
+        transcript_list = []
+
+    for langs in [["pt", "pt-BR"], ["en", "en-US"], None]:
         try:
-            entries = api.fetch(video_id, languages=langs) if langs else next(iter(api.list(video_id))).fetch()
+            if langs:
+                entries = api.fetch(video_id, languages=langs)
+            elif transcript_list:
+                entries = transcript_list[0].fetch()
+            else:
+                continue
             seen, lines = set(), []
             for e in entries:
-                t = (e.get("text") if isinstance(e, dict) else getattr(e,"text","")).strip()
-                if t and t not in seen: seen.add(t); lines.append(t)
-            return "\n".join(lines)
-        except Exception: pass
+                t = (e.get("text") if isinstance(e, dict) else getattr(e, "text", "")).strip()
+                if t and t not in seen:
+                    seen.add(t); lines.append(t)
+            if lines:
+                return "\n".join(lines)
+        except Exception as e:
+            print(f"  [AVISO] fetch({langs}): {e}", file=sys.stderr)
     return None
 
 

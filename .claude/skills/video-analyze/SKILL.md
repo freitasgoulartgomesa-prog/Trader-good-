@@ -1,44 +1,41 @@
 # Skill: video-analyze
 
-Analisa qualquer vídeo do YouTube — metadados, transcrição e frames visuais.
-Funciona tanto no **iPhone via browser** quanto no **PC local**.
+Analisa qualquer vídeo do YouTube — metadados, transcrição e análise visual.
+Funciona no **iPhone via browser** e no **PC local**.
 
 ---
 
 ## Como funciona por ambiente
 
-### iPhone / browser (claude.ai/code)
-Claude detecta que está no sandbox e **dispara um GitHub Action automaticamente**.
-O Action roda num servidor com internet completa, processa o vídeo e commita
-os resultados no repositório. Claude lê os arquivos e faz a análise.
-
-### PC local
-Claude processa tudo diretamente no seu computador.
+| Ambiente | Modo | Tempo | O que precisa |
+|---|---|---|---|
+| iPhone + Gemini | Análise direta via API | ~30s | `GEMINI_API_KEY` |
+| iPhone sem Gemini | GitHub Actions via MCP | ~3 min | secrets no repo |
+| PC local | Processamento completo | ~2 min | `.env` configurado |
 
 ---
 
 ## Setup (única vez)
 
-### 1. Instalar dependências (PC)
+### 1. Dependências no PC
 ```bash
 bash scripts/setup_video_skill.sh
 ```
 
-### 2. Configurar o arquivo `.env` (PC local)
+### 2. Arquivo `.env` (PC local)
 ```
-YOUTUBE_API_KEY=...     # obrigatório — console.cloud.google.com
-GROQ_API_KEY=...        # recomendado — console.groq.com (grátis)
+YOUTUBE_API_KEY=...   # console.cloud.google.com — YouTube Data API v3
+GEMINI_API_KEY=...    # aistudio.google.com — grátis, análise rápida no iPhone
+GROQ_API_KEY=...      # console.groq.com — grátis, Whisper (só PC local)
 ```
 
-### 3. Configurar secrets no repositório GitHub (para iPhone via Actions)
-Acesse pelo browser: github.com/freitasgoulartgomesa-prog/Trader-good-/settings/secrets/actions
+### 3. Secrets no GitHub (para iPhone via Actions ou Gemini)
+Acesse: `github.com/freitasgoulartgomesa-prog/Trader-good-/settings/secrets/actions`
 
-Adicione dois secrets:
-- `YOUTUBE_API_KEY` — a mesma chave do `.env`
-- `GROQ_API_KEY` — a mesma chave do `.env`
-
-> **Nota:** Não precisa de GITHUB_TOKEN. No iPhone, Claude usa sua
-> própria conexão GitHub (MCP) para disparar e monitorar o Action.
+Adicione:
+- `YOUTUBE_API_KEY`
+- `GEMINI_API_KEY` ← principal, habilita modo rápido no iPhone
+- `GROQ_API_KEY` ← opcional, só usado no GitHub Actions
 
 ---
 
@@ -50,75 +47,90 @@ Adicione dois secrets:
 
 ---
 
-## Fluxo no iPhone (sandbox) — usa MCP GitHub diretamente
+## Fluxo completo
 
 ### Passo 1 — Detectar ambiente
-Roda o script para ver o que está disponível:
 ```bash
 python3 scripts/video_processor.py "<URL>" --frames 8
 ```
 
-Se reportar `is_sandbox: true`, seguir os passos abaixo em vez de esperar o script.
+O script imprime `JSON_ENV:{...}` com o ambiente detectado.
 
-### Passo 2 — Disparar o GitHub Action via MCP
-Use a ferramenta `mcp__github__actions_run_trigger` com:
+---
+
+### Caminho A: iPhone + Gemini (`can_use_gemini: true`) ← MAIS RÁPIDO
+
+O script já rodou `video_gemini.py` internamente e imprimiu `JSON_RESULT:{...}`.
+
+Parse o JSON_RESULT. Leia os arquivos:
+- `info_json` → metadados (título, canal, duração, views)
+- `analysis` → `gemini_analysis.json` com transcript, visual_summary, key_topics
+
+```bash
+# O script já faz tudo, apenas leia os resultados:
+# JSON_RESULT impresso pelo próprio video_processor.py
+```
+
+Após ler os arquivos, sintetize:
+- **Contexto** — título, canal, duração, views
+- **Conteúdo** — resumo da transcrição (`transcript`)
+- **Visual** — o que aparece na tela (`visual_summary`)
+- **Tópicos-chave** — `key_topics`
+- **Insights** — relevantes ao objetivo do usuário
+
+---
+
+### Caminho B: iPhone sem Gemini (`USE_MCP_ACTIONS` impresso)
+
+#### Passo B1 — Disparar GitHub Action via MCP
+Use `mcp__github__actions_run_trigger`:
 - `owner`: `freitasgoulartgomesa-prog`
 - `repo`: `Trader-good-`
 - `workflow_id`: `video_analyze.yml`
 - `ref`: `claude/oi-gk0t6s`
 - `inputs`: `{"video_url": "<URL>", "frames": "8", "ref_branch": "claude/oi-gk0t6s"}`
 
-### Passo 3 — Aguardar conclusão
-Espere 60 segundos e verifique o status com `mcp__github__actions_list`:
+#### Passo B2 — Aguardar conclusão
+Espere 60s e verifique com `mcp__github__actions_list`:
 - `owner`: `freitasgoulartgomesa-prog`
 - `repo`: `Trader-good-`
 
-Fique verificando a cada 30s até `status: completed` e `conclusion: success`.
+Repita a cada 30s até `status: completed` e `conclusion: success`.
 
-### Passo 4 — Ler os resultados via MCP
-Use `mcp__github__get_file_contents` para ler cada arquivo:
+#### Passo B3 — Ler resultados via MCP
+Use `mcp__github__get_file_contents`:
 - `owner`: `freitasgoulartgomesa-prog`
 - `repo`: `Trader-good-`
 - `path`: `video_results/<VIDEO_ID>/summary.json`
 - `branch`: `claude/oi-gk0t6s`
 
-Depois leia `info.json`, `transcript.txt` e cada frame listado no summary.
+Leia também `info.json`, `transcript.txt` e cada frame listado no summary.
 
-Para imagens (frames, thumbnail): o conteúdo vem em base64 — decodifique,
-salve em `/tmp/` e leia com o Read tool para análise visual.
+Para imagens (frames, thumbnail): conteúdo em base64 — decodifique, salve em `/tmp/` e leia com o Read tool para análise visual.
 
-### Passo 5 — Sintetizar e responder
-Com base em tudo que foi lido:
-- **Contexto** — título, canal, duração, views, likes
-- **Resumo** — baseado na transcrição
-- **Análise visual** — o que aparece nos frames (gráficos, texto, padrões)
-- **Insights** — relevantes ao objetivo do usuário
+#### Passo B4 — Sintetizar
+Mesmo formato do Caminho A.
 
 ---
 
-## Fluxo no PC local
+### Caminho C: PC local (`is_sandbox: false`)
 
-### Passo 1 — Rodar o processador
-```bash
-python3 scripts/video_processor.py "<URL>" --frames 8
-```
+O script processa tudo localmente e imprime `JSON_RESULT:{...}`.
 
-### Passo 2 — Parsear JSON_RESULT
-A última linha contém `JSON_RESULT:{...}` com os caminhos locais.
-
-### Passo 3 — Ler arquivos
-Use o Read tool para ler `info_json`, `transcript`, cada frame e `thumbnail`.
+Leia os arquivos locais: `info_json`, `transcript`, `frames` (lista de paths), `thumbnail`.
 
 ---
 
 ## Parâmetros
 
-| Parâmetro | Padrão | Quando usar |
-|---|---|---|
-| `--frames 3` | — | Shorts (<3 min) |
-| `--frames 8` | ✅ | Tutoriais, análises, podcasts |
-| `--frames 12` | — | Vídeos muito visuais (gráficos) |
-| `--frames 20` | — | Análise profunda (documentários) |
+| Parâmetro | Quando usar |
+|---|---|
+| `--frames 3` | Shorts (<3 min) |
+| `--frames 8` | Padrão — tutoriais, podcasts, análises |
+| `--frames 12` | Vídeos muito visuais (gráficos, demos) |
+| `--frames 20` | Análise profunda (documentários) |
+
+*Nota: frames são usados apenas nos Caminhos B e C. O Gemini (Caminho A) analisa o vídeo inteiro de forma contínua.*
 
 ---
 
@@ -126,4 +138,5 @@ Use o Read tool para ler `info_json`, `transcript`, cada frame e `thumbnail`.
 
 - Somente YouTube (outras plataformas chegam na Fase 2)
 - Vídeos privados ou com restrição de idade não funcionam
-- No iPhone, o processamento leva 2-5 minutos (aguarda o GitHub Action)
+- Gemini: suporta vídeos de até ~1 hora
+- GitHub Actions: processamento leva 2-5 minutos

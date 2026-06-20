@@ -101,7 +101,7 @@ Responda APENAS com o JSON válido, sem markdown, sem texto antes ou depois."""
         }],
         "generationConfig": {
             "temperature": 0.1,
-            "maxOutputTokens": 8192,
+            "maxOutputTokens": 65536,
         }
     }
 
@@ -110,7 +110,7 @@ Responda APENAS com o JSON válido, sem markdown, sem texto antes ou depois."""
         f"{GEMINI_BASE}/models/{GEMINI_MODEL}:generateContent",
         params={"key": GEMINI_API_KEY},
         json=payload,
-        timeout=180
+        timeout=600
     )
 
     if r.status_code != 200:
@@ -138,8 +138,23 @@ Responda APENAS com o JSON válido, sem markdown, sem texto antes ou depois."""
 
     except (json.JSONDecodeError, KeyError, IndexError) as e:
         raw = text if "text" in dir() else r.text[:1000]
-        print(f"  [AVISO] JSON inválido do Gemini ({e}), retornando raw.", file=sys.stderr)
-        return {"raw_response": raw, "parse_error": str(e)}
+        print(f"  [AVISO] JSON inválido do Gemini ({e}), tentando recuperar parcial.", file=sys.stderr)
+        # Try to salvage truncated JSON by extracting known string fields
+        partial = {"raw_response": raw, "parse_error": str(e)}
+        for field in ["transcript", "visual_summary", "content_summary", "language", "tone", "target_audience"]:
+            m = re.search(rf'"{field}"\s*:\s*"((?:[^"\\]|\\.)*)', raw)
+            if m:
+                partial[field] = m.group(1)
+        for field in ["key_topics", "key_quotes"]:
+            m = re.search(rf'"{field}"\s*:\s*\[(.*?)\]', raw, re.DOTALL)
+            if m:
+                try:
+                    partial[field] = json.loads("[" + m.group(1) + "]")
+                except Exception:
+                    pass
+        if len(partial) > 2:
+            print(f"  Recuperados {len(partial)-2} campos do JSON parcial.", file=sys.stderr)
+        return partial
 
 
 def main():

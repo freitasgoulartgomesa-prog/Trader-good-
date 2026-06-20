@@ -1,0 +1,108 @@
+{
+  "name": "Trader-good — Monitor de Posição Aberta",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [{ "field": "minutes", "minutesInterval": 5 }]
+        }
+      },
+      "id": "schedule-5min",
+      "name": "Schedule — A cada 5 min",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [240, 300],
+      "notes": "Verifica posições abertas a cada 5 minutos durante o pregão."
+    },
+    {
+      "parameters": {
+        "url": "={{ $vars.TRADER_API_URL }}/posicao",
+        "options": {}
+      },
+      "id": "busca-posicao",
+      "name": "Busca Posição Atual",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [460, 300],
+      "notes": "Retorna posição atual: { ativo, quantidade, preco_entrada, preco_atual, pnl_aberto }"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "conditions": [
+            {
+              "leftValue": "={{ $json.posicao_aberta }}",
+              "rightValue": true,
+              "operator": { "type": "boolean", "operation": "true" }
+            }
+          ]
+        }
+      },
+      "id": "tem-posicao",
+      "name": "Tem Posição Aberta?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [680, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "const p = $input.first().json;\nconst pnl = p.pnl_aberto || 0;\nconst pct = p.pnl_pct || 0;\nconst ALERTA_GAIN = Number($vars.ALERTA_GAIN_PCT || 3);\nconst ALERTA_LOSS = Number($vars.ALERTA_LOSS_PCT || -2);\n\nif (pct >= ALERTA_GAIN || pct <= ALERTA_LOSS) {\n  const emoji = pct >= ALERTA_GAIN ? '🚀' : '⚠️';\n  const tipo = pct >= ALERTA_GAIN ? 'GAIN' : 'STOP';\n  return [{ json: {\n    alertar: true,\n    mensagem: `${emoji} *ALERTA ${tipo} — ${p.ativo}*\\n\\n` +\n      `*P&L aberto:* ${pct >= 0 ? '+' : ''}${pct.toFixed(2)}% (R$ ${pnl.toFixed(2)})\\n` +\n      `*Entrada:* R$ ${p.preco_entrada}\\n*Atual:* R$ ${p.preco_atual}\\n\\n` +\n      `_Considere realizar o resultado_`\n  }}];\n}\nreturn [{ json: { alertar: false } }];"
+      },
+      "id": "verifica-limites",
+      "name": "Verifica Limites",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [900, 220],
+      "notes": "Alerta quando P&L ultrapassar os limites configurados.\nVariáveis: ALERTA_GAIN_PCT (default 3%) e ALERTA_LOSS_PCT (default -2%)"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "conditions": [
+            {
+              "leftValue": "={{ $json.alertar }}",
+              "rightValue": true,
+              "operator": { "type": "boolean", "operation": "true" }
+            }
+          ]
+        }
+      },
+      "id": "deve-alertar",
+      "name": "Deve Alertar?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [1120, 220]
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $vars.TELEGRAM_CHAT_ID }}",
+        "text": "={{ $json.mensagem }}",
+        "additionalFields": { "parse_mode": "Markdown" }
+      },
+      "id": "telegram-alerta",
+      "name": "Telegram — Alerta Limite",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [1340, 160]
+    }
+  ],
+  "connections": {
+    "Schedule — A cada 5 min": {
+      "main": [[{ "node": "Busca Posição Atual", "type": "main", "index": 0 }]]
+    },
+    "Busca Posição Atual": {
+      "main": [[{ "node": "Tem Posição Aberta?", "type": "main", "index": 0 }]]
+    },
+    "Tem Posição Aberta?": {
+      "main": [[{ "node": "Verifica Limites", "type": "main", "index": 0 }], []]
+    },
+    "Verifica Limites": {
+      "main": [[{ "node": "Deve Alertar?", "type": "main", "index": 0 }]]
+    },
+    "Deve Alertar?": {
+      "main": [[{ "node": "Telegram — Alerta Limite", "type": "main", "index": 0 }], []]
+    }
+  },
+  "settings": { "executionOrder": "v1" },
+  "tags": ["trader-good", "monitor", "telegram"]
+}

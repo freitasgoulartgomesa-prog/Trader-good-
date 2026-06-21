@@ -1,0 +1,67 @@
+{
+  "name": "Trader-good — Alerta de Sinal via Telegram",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "trader-sinal",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "webhook-trigger",
+      "name": "Webhook — Recebe Sinal",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [240, 300],
+      "notes": "Recebe sinais do TradingView (Pine Script alert) ou do trader_good_gh.py via HTTP POST.\nPayload esperado: { ativo, direcao, preco, motivo, timestamp }"
+    },
+    {
+      "parameters": {
+        "jsCode": "const s = $input.first().json;\nconst emoji = (s.direcao || '').toUpperCase() === 'COMPRA' ? '🟢' : '🔴';\nconst dir = (s.direcao || '').toUpperCase() === 'COMPRA' ? 'COMPRA ▲' : 'VENDA ▼';\nreturn [{\n  json: {\n    mensagem: `${emoji} *SINAL ${dir}*\\n\\n*Ativo:* ${s.ativo || '-'}\\n*Preço:* R$ ${Number(s.preco || 0).toFixed(2)}\\n*Motivo:* ${s.motivo || '-'}\\n*Hora:* ${s.timestamp || new Date().toLocaleTimeString('pt-BR')}\\n\\n_Trader-good • automático_`\n  }\n}];"
+      },
+      "id": "formata-mensagem",
+      "name": "Formata Mensagem",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [460, 300],
+      "notes": "Formata a mensagem Telegram com Markdown."
+    },
+    {
+      "parameters": {
+        "chatId": "7781636068",
+        "text": "={{ $json.mensagem }}",
+        "additionalFields": { "parse_mode": "Markdown" }
+      },
+      "id": "telegram-envio",
+      "name": "Telegram — Envia Alerta",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [680, 300],
+      "notes": "Credencial: selecione 'Telegram account' (bot @Tetristradergood_bot)"
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={ \"status\": \"ok\" }"
+      },
+      "id": "webhook-response",
+      "name": "Resposta OK",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [900, 300]
+    }
+  ],
+  "connections": {
+    "Webhook — Recebe Sinal": {
+      "main": [[{ "node": "Formata Mensagem", "type": "main", "index": 0 }]]
+    },
+    "Formata Mensagem": {
+      "main": [[{ "node": "Telegram — Envia Alerta", "type": "main", "index": 0 }]]
+    },
+    "Telegram — Envia Alerta": {
+      "main": [[{ "node": "Resposta OK", "type": "main", "index": 0 }]]
+    }
+  },
+  "settings": { "executionOrder": "v1" },
+  "tags": ["trader-good", "alertas", "telegram"]
+}

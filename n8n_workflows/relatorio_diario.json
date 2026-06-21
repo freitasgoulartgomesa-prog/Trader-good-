@@ -1,0 +1,102 @@
+{
+  "name": "Trader-good — Relatório Diário de P&L",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [{ "field": "cronExpression", "expression": "0 18 * * 1-5" }]
+        }
+      },
+      "id": "schedule-trigger",
+      "name": "Schedule — 18h úteis",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [240, 300],
+      "notes": "Roda todo dia útil às 18h. Ajuste o cron conforme seu horário de encerramento."
+    },
+    {
+      "parameters": {
+        "url": "https://SEU-TRADER-API-URL/estado",
+        "options": {}
+      },
+      "id": "busca-estado",
+      "name": "Busca Estado do Trader",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [460, 300],
+      "notes": "Substitua https://SEU-TRADER-API-URL pela URL real da API do trader.\nAlternativa: use nó GitHub para ler estado.json do repositório."
+    },
+    {
+      "parameters": {
+        "url": "https://SEU-TRADER-API-URL/historico?limite=20",
+        "options": {}
+      },
+      "id": "busca-historico",
+      "name": "Busca Últimas Operações",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [460, 460],
+      "notes": "Busca as últimas 20 operações do histórico."
+    },
+    {
+      "parameters": {
+        "mode": "combine",
+        "combinationMode": "mergeByPosition",
+        "options": {}
+      },
+      "id": "merge-dados",
+      "name": "Combina Dados",
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3,
+      "position": [680, 380]
+    },
+    {
+      "parameters": {
+        "jsCode": "const estado = $input.all()[0]?.json || {};\nconst historico = $input.all()[1]?.json?.operacoes || [];\n\nconst hoje = new Date().toLocaleDateString('pt-BR');\nconst ops_hoje = historico.filter(op => {\n  const data = new Date(op.timestamp || op.data);\n  return data.toLocaleDateString('pt-BR') === hoje;\n});\n\nconst ganhos = ops_hoje.filter(op => (op.resultado || 0) > 0);\nconst perdas = ops_hoje.filter(op => (op.resultado || 0) < 0);\nconst pnl_dia = ops_hoje.reduce((s, op) => s + (op.resultado || 0), 0);\n\nconst saldo = estado.saldo || 0;\nconst pnl_total = estado.pnl_total || 0;\n\nconst emoji_dia = pnl_dia >= 0 ? '🟢' : '🔴';\nconst sinal_dia = pnl_dia >= 0 ? '+' : '';\n\nreturn [{ json: {\n  mensagem: `📊 *RELATÓRIO DIÁRIO — ${hoje}*\\n\\n` +\n    `${emoji_dia} *P&L do dia:* ${sinal_dia}R$ ${pnl_dia.toFixed(2)}\\n` +\n    `📈 *Operações:* ${ops_hoje.length} (✅ ${ganhos.length} / ❌ ${perdas.length})\\n` +\n    `💰 *Saldo atual:* R$ ${saldo.toFixed(2)}\\n` +\n    `📉 *P&L acumulado:* R$ ${pnl_total.toFixed(2)}\\n\\n` +\n    `_Trader-good • ${new Date().toLocaleTimeString('pt-BR')}_`\n}}];"
+      },
+      "id": "gera-relatorio",
+      "name": "Gera Relatório",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [900, 380],
+      "notes": "Calcula P&L do dia, winrate e saldo. Ajuste os campos conforme estrutura do estado.json."
+    },
+    {
+      "parameters": {
+        "chatId": "7781636068",
+        "text": "={{ $json.mensagem }}",
+        "additionalFields": { "parse_mode": "Markdown" }
+      },
+      "id": "telegram-relatorio",
+      "name": "Telegram — Envia Relatório",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [1120, 380],
+      "notes": "Credencial: selecione 'Telegram account' (bot @Tetristradergood_bot)"
+    }
+  ],
+  "connections": {
+    "Schedule — 18h úteis": {
+      "main": [
+        [
+          { "node": "Busca Estado do Trader", "type": "main", "index": 0 },
+          { "node": "Busca Últimas Operações", "type": "main", "index": 0 }
+        ]
+      ]
+    },
+    "Busca Estado do Trader": {
+      "main": [[{ "node": "Combina Dados", "type": "main", "index": 0 }]]
+    },
+    "Busca Últimas Operações": {
+      "main": [[{ "node": "Combina Dados", "type": "main", "index": 1 }]]
+    },
+    "Combina Dados": {
+      "main": [[{ "node": "Gera Relatório", "type": "main", "index": 0 }]]
+    },
+    "Gera Relatório": {
+      "main": [[{ "node": "Telegram — Envia Relatório", "type": "main", "index": 0 }]]
+    }
+  },
+  "settings": { "executionOrder": "v1" },
+  "tags": ["trader-good", "relatorio", "telegram"]
+}

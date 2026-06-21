@@ -16,7 +16,7 @@
     },
     {
       "parameters": {
-        "url": "={{ $vars.TRADER_API_URL }}/estado",
+        "url": "https://SEU-TRADER-API-URL/estado",
         "options": {}
       },
       "id": "busca-estado",
@@ -24,11 +24,11 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [460, 300],
-      "notes": "Busca estado.json via API ou lê direto do GitHub.\nAlternativa: use nó GitHub para ler estado.json do repositório."
+      "notes": "Substitua https://SEU-TRADER-API-URL pela URL real da API do trader.\nAlternativa: use nó GitHub para ler estado.json do repositório."
     },
     {
       "parameters": {
-        "url": "={{ $vars.TRADER_API_URL }}/historico?limite=20",
+        "url": "https://SEU-TRADER-API-URL/historico?limite=20",
         "options": {}
       },
       "id": "busca-historico",
@@ -63,7 +63,7 @@
     },
     {
       "parameters": {
-        "chatId": "={{ $vars.TELEGRAM_CHAT_ID }}",
+        "chatId": "7781636068",
         "text": "={{ $json.mensagem }}",
         "additionalFields": { "parse_mode": "Markdown" }
       },
@@ -72,7 +72,7 @@
       "type": "n8n-nodes-base.telegram",
       "typeVersion": 1.2,
       "position": [1120, 380],
-      "notes": "Envia o relatório diário para o Telegram."
+      "notes": "Credencial: selecione 'Telegram account' (bot @Tetristradergood_bot)"
     }
   ],
   "connections": {

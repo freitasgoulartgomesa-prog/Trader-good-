@@ -16,7 +16,7 @@
     },
     {
       "parameters": {
-        "url": "={{ $vars.TRADER_API_URL }}/posicao",
+        "url": "https://SEU-TRADER-API-URL/posicao",
         "options": {}
       },
       "id": "busca-posicao",
@@ -24,7 +24,7 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [460, 300],
-      "notes": "Retorna posição atual: { ativo, quantidade, preco_entrada, preco_atual, pnl_aberto }"
+      "notes": "Substitua https://SEU-TRADER-API-URL pela URL real da API do trader.\nRetorna: { ativo, quantidade, preco_entrada, preco_atual, pnl_aberto, pnl_pct, posicao_aberta }"
     },
     {
       "parameters": {
@@ -46,14 +46,14 @@
     },
     {
       "parameters": {
-        "jsCode": "const p = $input.first().json;\nconst pnl = p.pnl_aberto || 0;\nconst pct = p.pnl_pct || 0;\nconst ALERTA_GAIN = Number($vars.ALERTA_GAIN_PCT || 3);\nconst ALERTA_LOSS = Number($vars.ALERTA_LOSS_PCT || -2);\n\nif (pct >= ALERTA_GAIN || pct <= ALERTA_LOSS) {\n  const emoji = pct >= ALERTA_GAIN ? '🚀' : '⚠️';\n  const tipo = pct >= ALERTA_GAIN ? 'GAIN' : 'STOP';\n  return [{ json: {\n    alertar: true,\n    mensagem: `${emoji} *ALERTA ${tipo} — ${p.ativo}*\\n\\n` +\n      `*P&L aberto:* ${pct >= 0 ? '+' : ''}${pct.toFixed(2)}% (R$ ${pnl.toFixed(2)})\\n` +\n      `*Entrada:* R$ ${p.preco_entrada}\\n*Atual:* R$ ${p.preco_atual}\\n\\n` +\n      `_Considere realizar o resultado_`\n  }}];\n}\nreturn [{ json: { alertar: false } }];"
+        "jsCode": "const p = $input.first().json;\nconst pnl = p.pnl_aberto || 0;\nconst pct = p.pnl_pct || 0;\nconst ALERTA_GAIN = 3;\nconst ALERTA_LOSS = -2;\n\nif (pct >= ALERTA_GAIN || pct <= ALERTA_LOSS) {\n  const emoji = pct >= ALERTA_GAIN ? '🚀' : '⚠️';\n  const tipo = pct >= ALERTA_GAIN ? 'GAIN' : 'STOP';\n  return [{ json: {\n    alertar: true,\n    mensagem: `${emoji} *ALERTA ${tipo} — ${p.ativo}*\\n\\n` +\n      `*P&L aberto:* ${pct >= 0 ? '+' : ''}${pct.toFixed(2)}% (R$ ${pnl.toFixed(2)})\\n` +\n      `*Entrada:* R$ ${p.preco_entrada}\\n*Atual:* R$ ${p.preco_atual}\\n\\n` +\n      `_Considere realizar o resultado_`\n  }}];\n}\nreturn [{ json: { alertar: false } }];"
       },
       "id": "verifica-limites",
       "name": "Verifica Limites",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [900, 220],
-      "notes": "Alerta quando P&L ultrapassar os limites configurados.\nVariáveis: ALERTA_GAIN_PCT (default 3%) e ALERTA_LOSS_PCT (default -2%)"
+      "notes": "Alerta quando P&L >= +3% (GAIN) ou <= -2% (LOSS).\nPara ajustar os limites, edite ALERTA_GAIN e ALERTA_LOSS neste nó."
     },
     {
       "parameters": {
@@ -75,7 +75,7 @@
     },
     {
       "parameters": {
-        "chatId": "={{ $vars.TELEGRAM_CHAT_ID }}",
+        "chatId": "7781636068",
         "text": "={{ $json.mensagem }}",
         "additionalFields": { "parse_mode": "Markdown" }
       },
@@ -83,7 +83,8 @@
       "name": "Telegram — Alerta Limite",
       "type": "n8n-nodes-base.telegram",
       "typeVersion": 1.2,
-      "position": [1340, 160]
+      "position": [1340, 160],
+      "notes": "Credencial: selecione 'Telegram account' (bot @Tetristradergood_bot)"
     }
   ],
   "connections": {

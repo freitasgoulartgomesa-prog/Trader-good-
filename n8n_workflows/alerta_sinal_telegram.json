@@ -17,38 +17,18 @@
     },
     {
       "parameters": {
-        "conditions": {
-          "options": { "caseSensitive": false },
-          "conditions": [
-            {
-              "leftValue": "={{ $json.direcao }}",
-              "rightValue": "COMPRA",
-              "operator": { "type": "string", "operation": "equals" }
-            }
-          ]
-        }
-      },
-      "id": "if-compra",
-      "name": "É Compra?",
-      "type": "n8n-nodes-base.if",
-      "typeVersion": 2,
-      "position": [460, 300],
-      "notes": "Separa sinais de COMPRA e VENDA para emojis diferentes na mensagem"
-    },
-    {
-      "parameters": {
-        "jsCode": "const s = $input.first().json;\nconst emoji = s.direcao === 'COMPRA' ? '🟢' : '🔴';\nconst dir = s.direcao === 'COMPRA' ? 'COMPRA ▲' : 'VENDA ▼';\nreturn [{\n  json: {\n    mensagem: `${emoji} *SINAL ${dir}*\\n\\n*Ativo:* ${s.ativo}\\n*Preço:* R$ ${Number(s.preco).toFixed(2)}\\n*Motivo:* ${s.motivo || '-'}\\n*Hora:* ${s.timestamp || new Date().toLocaleTimeString('pt-BR')}\\n\\n_Trader-good • automático_`\n  }\n}];"
+        "jsCode": "const s = $input.first().json;\nconst emoji = (s.direcao || '').toUpperCase() === 'COMPRA' ? '🟢' : '🔴';\nconst dir = (s.direcao || '').toUpperCase() === 'COMPRA' ? 'COMPRA ▲' : 'VENDA ▼';\nreturn [{\n  json: {\n    mensagem: `${emoji} *SINAL ${dir}*\\n\\n*Ativo:* ${s.ativo || '-'}\\n*Preço:* R$ ${Number(s.preco || 0).toFixed(2)}\\n*Motivo:* ${s.motivo || '-'}\\n*Hora:* ${s.timestamp || new Date().toLocaleTimeString('pt-BR')}\\n\\n_Trader-good • automático_`\n  }\n}];"
       },
       "id": "formata-mensagem",
       "name": "Formata Mensagem",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [680, 300],
-      "notes": "Formata a mensagem Telegram com Markdown. Ajuste o template conforme preferir."
+      "position": [460, 300],
+      "notes": "Formata a mensagem Telegram com Markdown."
     },
     {
       "parameters": {
-        "chatId": "={{ $vars.TELEGRAM_CHAT_ID }}",
+        "chatId": "7781636068",
         "text": "={{ $json.mensagem }}",
         "additionalFields": { "parse_mode": "Markdown" }
       },
@@ -56,8 +36,8 @@
       "name": "Telegram — Envia Alerta",
       "type": "n8n-nodes-base.telegram",
       "typeVersion": 1.2,
-      "position": [900, 300],
-      "notes": "Configure: credencial Telegram Bot + variável TELEGRAM_CHAT_ID no n8n.\nPara obter o chat_id: envie /start para o bot e acesse https://api.telegram.org/bot<TOKEN>/getUpdates"
+      "position": [680, 300],
+      "notes": "Credencial: selecione 'Telegram account' (bot @Tetristradergood_bot)"
     },
     {
       "parameters": {
@@ -68,18 +48,12 @@
       "name": "Resposta OK",
       "type": "n8n-nodes-base.respondToWebhook",
       "typeVersion": 1,
-      "position": [1120, 300]
+      "position": [900, 300]
     }
   ],
   "connections": {
     "Webhook — Recebe Sinal": {
-      "main": [[{ "node": "É Compra?", "type": "main", "index": 0 }]]
-    },
-    "É Compra?": {
-      "main": [
-        [{ "node": "Formata Mensagem", "type": "main", "index": 0 }],
-        [{ "node": "Formata Mensagem", "type": "main", "index": 0 }]
-      ]
+      "main": [[{ "node": "Formata Mensagem", "type": "main", "index": 0 }]]
     },
     "Formata Mensagem": {
       "main": [[{ "node": "Telegram — Envia Alerta", "type": "main", "index": 0 }]]
